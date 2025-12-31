@@ -135,7 +135,7 @@ const Game: React.FC = () => {
       });
       setPlayerPos({ x: 1, y: 1 });
       setIsDying(false);
-      // Give 3 seconds of shield after respawn
+      // Give 3 seconds of shield after respawn (posterior a morir)
       setShieldEndTime(Date.now() + 3000);
     }, 800);
   }, []);
@@ -223,7 +223,9 @@ const Game: React.FC = () => {
     setIsDying(false);
     setLevel(lvl);
     setElapsedTime(0);
-    setShieldEndTime(0); // Reset shield on new level? Usually yes, but user said keep stats. Let's keep shield off to balance.
+    
+    // ACTIVAR ESCUDO AL INICIAR NIVEL: 5 SEGUNDOS
+    setShieldEndTime(Date.now() + 5000); 
     
     if (resetStats) setPlayerStats(INITIAL_PLAYER_STATS);
     else setPlayerStats(s => ({ 
@@ -295,7 +297,8 @@ const Game: React.FC = () => {
         else if (cell === CellType.POWERUP_LIFE) setPlayerStats(s => ({ ...s, lives: Math.min(5, s.lives + 1), score: s.score + 500 }));
         else if (cell === CellType.POWERUP_DANGER) setPlayerStats(s => ({ ...s, dangerSensorUses: s.dangerSensorUses + 5, score: s.score + 300 }));
         else if (cell === CellType.POWERUP_VEST) {
-           setShieldEndTime(Date.now() + 30000); // 30 Seconds Shield
+           // ACTIVAR ESCUDO POR ITEM: 30 SEGUNDOS
+           setShieldEndTime(Date.now() + 30000); 
            setPlayerStats(s => ({ ...s, score: s.score + 500 }));
         }
         setMap(m => { const nm = [...m.map(r => [...r])]; nm[ny][nx] = CellType.EMPTY; return nm; });
@@ -433,10 +436,10 @@ const Game: React.FC = () => {
       );
     } else if (en.type === 'bat') {
       return (
-        <div className="relative w-12 h-8 flex items-center justify-center animate-walk">
+        <div className="relative w-12 h-8 flex items-center justify-center animate-walk drop-shadow-[0_0_3px_#ef4444]">
           <div className="absolute -left-2 top-0 w-6 h-6 bg-zinc-900 rotate-45 border-l border-zinc-700"></div>
           <div className="absolute -right-2 top-0 w-6 h-6 bg-zinc-900 -rotate-45 border-r border-zinc-700"></div>
-          <div className="relative w-5 h-5 bg-zinc-800 rounded-full border border-purple-900 z-10 flex flex-col items-center">
+          <div className="relative w-5 h-5 bg-zinc-800 rounded-full border border-zinc-600 z-10 flex flex-col items-center">
              <div className="flex gap-1 mt-1">
                <div className="w-1.5 h-1.5 bg-red-600 rounded-full shadow-[0_0_5px_red] animate-pulse"></div>
                <div className="w-1.5 h-1.5 bg-red-600 rounded-full shadow-[0_0_5px_red] animate-pulse"></div>
@@ -584,6 +587,11 @@ const Game: React.FC = () => {
           <div className={`absolute z-30 transition-all duration-150 flex items-center justify-center ${isDying ? 'animate-die' : isMoving ? 'animate-walk' : 'animate-idle'}`} 
                style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8, transform: `scaleX(${playerFacing === 'right' ? 1 : -1})` }}>
             <div className={`relative w-10 h-12 ${currentSkin.color} rounded-xl border-2 ${currentSkin.borderColor} shadow-2xl ${currentSkin.glowColor} ${isShieldActive ? 'ring-4 ring-sky-400/50 shadow-[0_0_20px_rgba(56,189,248,0.6)]' : ''}`}>
+               {/* Shield Bubble Overlay */}
+               {isShieldActive && (
+                 <div className="absolute -inset-3 bg-sky-500/20 rounded-full border-2 border-sky-400/40 shadow-[0_0_15px_#38bdf8] animate-pulse pointer-events-none"></div>
+               )}
+               
                <div className="absolute -top-4 left-1/2 -translate-x-1/2 flex flex-col items-center">
                  <div className="w-0.5 h-4 bg-white/60"></div>
                  <div className={`w-3 h-3 ${currentSkin.ledColor} rounded-full border border-white/40 animate-led`}></div>
