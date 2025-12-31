@@ -1,0 +1,5 @@
+{
+  "name": "Retro Bomberman React",
+  "description": "A classic grid-based Bomberman clone with levels, power-ups, enemies, and cross-explosions.",
+  "requestFramePermissions": []
+}

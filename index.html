@@ -1,0 +1,108 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#18181b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+  <title>Bomberman Ultra</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --cell-size: 48px;
+    }
+    @keyframes explode {
+      0% { transform: scale(0.1); opacity: 1; filter: brightness(2); }
+      50% { transform: scale(1.2); opacity: 1; }
+      100% { transform: scale(1); opacity: 0; filter: brightness(1); }
+    }
+    @keyframes bounce-small {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-4px); }
+    }
+    @keyframes walk {
+      0%, 100% { transform: rotate(-8deg) translateY(-2px); }
+      50% { transform: rotate(8deg) translateY(0px); }
+    }
+    @keyframes enemy-float {
+      0%, 100% { transform: translateY(0) scale(1); }
+      50% { transform: translateY(-6px) scale(1.05); }
+    }
+    @keyframes enemy-wobble {
+      0%, 100% { transform: rotate(-3deg); }
+      50% { transform: rotate(3deg); }
+    }
+    @keyframes pulse-fuse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.5); opacity: 0.7; }
+    }
+    @keyframes player-die {
+      0% { transform: rotate(0) scale(1); filter: brightness(1); }
+      50% { transform: rotate(360deg) scale(1.5); filter: brightness(5); }
+      100% { transform: rotate(720deg) scale(0); filter: brightness(10); opacity: 0; }
+    }
+    @keyframes screen-shake {
+      0% { transform: translate(0,0); }
+      25% { transform: translate(5px, -5px); }
+      50% { transform: translate(-5px, 5px); }
+      75% { transform: translate(5px, 5px); }
+      100% { transform: translate(0,0); }
+    }
+    .animate-explode {
+      animation: explode 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    }
+    .animate-walk {
+      animation: walk 0.25s infinite ease-in-out;
+    }
+    .animate-idle {
+      animation: bounce-small 2s infinite ease-in-out;
+    }
+    .animate-enemy {
+      animation: enemy-float 1.5s infinite ease-in-out, enemy-wobble 0.8s infinite ease-in-out;
+    }
+    .animate-die {
+      animation: player-die 0.8s forwards;
+    }
+    .screen-shake {
+      animation: screen-shake 0.2s 3;
+    }
+    body {
+      background: radial-gradient(circle at center, #18181b 0%, #09090b 100%);
+      margin: 0;
+      padding: 0;
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      height: 100dvh;
+      width: 100vw;
+      overflow: hidden;
+      font-family: 'Inter', sans-serif;
+    }
+    .font-game {
+      font-family: 'Bungee', cursive;
+    }
+    #root {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+  </style>
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+  }
+}
+</script>
+</head>
+<body class="text-white">
+  <div id="root"></div>
+</body>
+</html>
