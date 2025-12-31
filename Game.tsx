@@ -34,9 +34,10 @@ const Game: React.FC = () => {
   const [map, setMap] = useState<CellType[][]>([]);
   const [hiddenExit, setHiddenExit] = useState<Position | null>(null);
   const [playerPos, setPlayerPos] = useState<Position>({ x: 1, y: 1 });
-  const [playerFacing, setPlayerFacing] = useState<'left' | 'right'>('right');
+  const [playerFacing, setPlayerFacing] = useState<'up' | 'down' | 'left' | 'right'>('down');
   const [isMoving, setIsMoving] = useState(false);
   const [isDying, setIsDying] = useState(false);
+  const [isExiting, setIsExiting] = useState(false); 
   const [playerStats, setPlayerStats] = useState<PlayerStats>(INITIAL_PLAYER_STATS);
   const [bombs, setBombs] = useState<Bomb[]>([]);
   const [enemies, setEnemies] = useState<Enemy[]>([]);
@@ -62,6 +63,7 @@ const Game: React.FC = () => {
   const lastMoveTimeRef = useRef(0);
   const isDyingRef = useRef(false);
   const shieldEndTimeRef = useRef(0);
+  const isExitingRef = useRef(false);
 
   const currentPlanet = Math.floor((level - 1) / 5) + 1;
   const currentWorld = Math.min(5, currentPlanet);
@@ -87,13 +89,13 @@ const Game: React.FC = () => {
 
   useEffect(() => {
     let timer: number;
-    if (status === GameStatus.PLAYING) {
+    if (status === GameStatus.PLAYING && !isExiting) {
       timer = window.setInterval(() => {
         setElapsedTime(prev => prev + 1);
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [status]);
+  }, [status, isExiting]);
 
   useEffect(() => { mapRef.current = map; }, [map]);
   useEffect(() => { enemiesRef.current = enemies; }, [enemies]);
@@ -103,6 +105,7 @@ const Game: React.FC = () => {
   useEffect(() => { playerStatsRef.current = playerStats; }, [playerStats]);
   useEffect(() => { isDyingRef.current = isDying; }, [isDying]);
   useEffect(() => { shieldEndTimeRef.current = shieldEndTime; }, [shieldEndTime]);
+  useEffect(() => { isExitingRef.current = isExiting; }, [isExiting]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -120,19 +123,30 @@ const Game: React.FC = () => {
   }, []);
 
   const handlePlayerDeath = useCallback(() => {
-    if (isDyingRef.current) return;
+    if (isDyingRef.current || isExitingRef.current) return;
     if (Date.now() < shieldEndTimeRef.current) return;
 
     setIsDying(true);
     soundSystem.playDeath();
+    
     setTimeout(() => {
       setPlayerStats(s => {
         const nextLives = Math.max(0, s.lives - 1);
-        if (nextLives <= 0) setStatus(GameStatus.GAME_OVER);
-        return { ...s, lives: nextLives };
+        if (nextLives <= 0) {
+          setStatus(GameStatus.GAME_OVER);
+          return s; // No importa, game over
+        }
+        return { 
+          ...INITIAL_PLAYER_STATS, 
+          score: s.score, 
+          lives: nextLives 
+        };
       });
+      
       setPlayerPos({ x: 1, y: 1 });
       setIsDying(false);
+      setPlayerFacing('down'); // Reset facing on respawn
+      
       const duration = 3000;
       setShieldEndTime(Date.now() + duration);
       setShieldMaxDuration(duration);
@@ -222,6 +236,7 @@ const Game: React.FC = () => {
   }, [hiddenExit, handlePlayerDeath, currentPlanet]);
 
   const initLevel = useCallback((lvl: number, resetStats: boolean = false) => {
+    // Generación de mapa ahora es más robusta (ver cambios en mapGenerator)
     const { map: newMap, exitPos } = generateMap(lvl);
     const newEnemies = generateEnemies(lvl, newMap);
     setMap(newMap);
@@ -229,16 +244,26 @@ const Game: React.FC = () => {
     setEnemies(newEnemies);
     setDyingEnemies([]);
     setPlayerPos({ x: 1, y: 1 });
+    setPlayerFacing('down');
     setBombs([]);
     setExplosions([]);
     setIsDying(false);
+    setIsExiting(false);
     setLevel(lvl);
     setElapsedTime(0);
     const duration = 5000;
     setShieldEndTime(Date.now() + duration);
     setShieldMaxDuration(duration);
+    
     if (resetStats) setPlayerStats(INITIAL_PLAYER_STATS);
-    else setPlayerStats(s => ({ ...s, hasKey: false, maxBombs: s.maxBombs, range: s.range, speed: s.speed, dangerSensorUses: s.dangerSensorUses }));
+    else setPlayerStats(s => ({ 
+      ...s, 
+      hasKey: false, 
+      maxBombs: s.maxBombs, 
+      range: s.range, 
+      speed: s.speed, 
+      dangerSensorUses: s.dangerSensorUses 
+    }));
     setStatus(GameStatus.PLAYING);
   }, []);
 
@@ -251,8 +276,17 @@ const Game: React.FC = () => {
     setStatus(GameStatus.LEVEL_COMPLETE);
   }, [level, unlockedLevel]);
 
+  const triggerExitSequence = useCallback(() => {
+    if (isExitingRef.current) return;
+    setIsExiting(true);
+    soundSystem.playPowerUp();
+    setTimeout(() => {
+      completeLevel();
+    }, 1500);
+  }, [completeLevel]);
+
   const plantBomb = useCallback(() => {
-    if (statusRef.current !== GameStatus.PLAYING || isDyingRef.current) return;
+    if (statusRef.current !== GameStatus.PLAYING || isDyingRef.current || isExitingRef.current) return;
     const now = Date.now();
     if (bombsRef.current.length < playerStatsRef.current.maxBombs) {
       if (!bombsRef.current.some(b => b.x === playerPosRef.current.x && b.y === playerPosRef.current.y)) {
@@ -273,13 +307,16 @@ const Game: React.FC = () => {
   }, []);
 
   const performMove = useCallback((dir: 'up' | 'down' | 'left' | 'right') => {
-    if (statusRef.current !== GameStatus.PLAYING || isDyingRef.current) return false;
+    if (statusRef.current !== GameStatus.PLAYING || isDyingRef.current || isExitingRef.current) return false;
     const now = Date.now();
     if (now - lastMoveTimeRef.current < playerStatsRef.current.speed) return false;
 
+    // ACTUALIZACIÓN: Lógica de orientación estricta
     let nx = playerPosRef.current.x, ny = playerPosRef.current.y;
-    if (dir === 'left') { setPlayerFacing('left'); nx--; }
-    else if (dir === 'right') { setPlayerFacing('right'); nx++; }
+    setPlayerFacing(dir); // Ahora actualizamos facing para cualquier dirección
+
+    if (dir === 'left') nx--;
+    else if (dir === 'right') nx++;
     else if (dir === 'up') ny--;
     else if (dir === 'down') ny++;
 
@@ -319,7 +356,9 @@ const Game: React.FC = () => {
         if (currentPlanet === 4 && !playerStatsRef.current.hasKey) {
           // Bloqueado
         } else {
-          completeLevel();
+          setPlayerPos({ x: nx, y: ny }); 
+          triggerExitSequence();
+          return true;
         }
       }
 
@@ -333,7 +372,7 @@ const Game: React.FC = () => {
       return true;
     }
     return false;
-  }, [handlePlayerDeath, currentPlanet, completeLevel]);
+  }, [handlePlayerDeath, currentPlanet, triggerExitSequence]);
 
   const togglePause = useCallback(() => {
     if (statusRef.current === GameStatus.PLAYING) setStatus(GameStatus.PAUSED);
@@ -415,139 +454,227 @@ const Game: React.FC = () => {
     );
   }
 
-  // RENDERIZADOR DE PLAYER PERSONALIZADO POR SKIN
+  // --- RENDERIZADOR AVANZADO 4 DIRECCIONES ---
   const renderPlayer = () => {
     const isShieldActive = Date.now() < shieldEndTime;
-    const commonClasses = `absolute z-30 transition-all duration-150 flex items-center justify-center ${isDying ? 'animate-die' : isMoving ? 'animate-walk' : 'animate-idle'}`;
-    const transform = `scaleX(${playerFacing === 'right' ? 1 : -1})`;
-
-    // ELEMENTOS COMUNES
-    const shieldOverlay = isShieldActive ? (
+    const isBack = playerFacing === 'up';
+    const isSide = playerFacing === 'left' || playerFacing === 'right';
+    
+    // LOGICA DE FLIP SOLIDA: Invertimos el eje X si mira a la izquierda.
+    // Void skin es la única excepción porque es simétrica/circular.
+    const shouldFlip = playerFacing === 'left' && currentSkinId !== 'void';
+    
+    // ELEMENTOS COMUNES DE UI PLAYER
+    const shieldOverlay = isShieldActive && !isExiting ? (
       <div className="absolute -inset-2 bg-sky-500/20 rounded-full border-2 border-sky-400/40 shadow-[0_0_15px_#38bdf8] animate-pulse pointer-events-none z-50"></div>
     ) : null;
-    const keyIndicator = playerStats.hasKey ? <div className="absolute -left-2 -top-2 text-xs z-50 animate-bounce">🔑</div> : null;
+    const keyIndicator = playerStats.hasKey && !isExiting ? <div className="absolute -left-2 -top-2 text-xs z-50 animate-bounce">🔑</div> : null;
 
-    switch (currentSkinId) {
-      case 'dragon':
-        return (
-          <div className={commonClasses} style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8, transform }}>
-             {shieldOverlay}
-             {keyIndicator}
+    // CONTENIDO ESPECÍFICO DE LA SKIN
+    const skinContent = (() => {
+      switch (currentSkinId) {
+        case 'dragon':
+          return (
              <div className="relative w-10 h-10">
-                {/* Dragon Breath Fire */}
-                <div className="absolute top-1/2 -right-4 w-2 h-2 bg-orange-500 rounded-full blur-[2px] opacity-0 dragon-particle"></div>
-                <div className="absolute top-1/2 -right-6 w-1 h-1 bg-red-500 rounded-full blur-[1px] opacity-0 dragon-particle" style={{ animationDelay: '0.2s' }}></div>
+                {/* Partículas de fuego solo de frente o lado */}
+                {!isExiting && !isBack && (
+                  <div className="absolute top-1/2 -right-6 w-2 h-2 bg-orange-500 rounded-full blur-[2px] opacity-0 dragon-particle"></div>
+                )}
                 
-                {/* Body */}
-                <div className="absolute bottom-0 left-2 w-6 h-6 bg-orange-700 rounded-full border border-orange-900 shadow-inner"></div>
-                <div className="absolute bottom-1 left-1 w-2 h-4 bg-orange-600 rounded-full -rotate-12"></div>
-                <div className="absolute bottom-1 right-3 w-2 h-4 bg-orange-600 rounded-full rotate-12"></div>
+                {/* Cola */}
+                <div className={`absolute ${isBack ? 'bottom-0 left-1/2 -translate-x-1/2 w-2 h-6' : 'bottom-1 -left-3 w-4 h-3 origin-right rotate-12'} bg-green-700 rounded-full`}></div>
                 
-                {/* Head */}
-                <div className="absolute top-1 left-1 w-8 h-7 bg-orange-600 rounded-xl border border-orange-800 flex items-center justify-center shadow-lg z-10">
-                   {/* Horns */}
-                   <div className="absolute -top-2 -left-1 w-3 h-4 bg-yellow-600 clip-path-triangle -rotate-12"></div>
-                   <div className="absolute -top-2 right-1 w-3 h-4 bg-yellow-600 clip-path-triangle rotate-12"></div>
-                   {/* Eyes */}
-                   <div className="w-2 h-2 bg-yellow-300 rotate-45 border border-black shadow-[0_0_5px_yellow]"></div>
-                   <div className="w-2 h-2 bg-yellow-300 rotate-45 border border-black shadow-[0_0_5px_yellow] ml-2"></div>
+                {/* Cuerpo */}
+                <div className="absolute bottom-0 left-1 w-7 h-7 bg-green-700 rounded-full border border-green-900 shadow-inner z-10">
+                   {!isBack && <div className="absolute top-1 left-2 w-4 h-4 bg-yellow-200/40 rounded-full blur-[1px]"></div>}
+                   {isBack && <div className="absolute top-1 left-2 w-3 h-5 bg-green-800 rounded-full blur-[1px]"></div>}
                 </div>
-                {/* Tail */}
-                <div className="absolute bottom-2 -left-2 w-4 h-2 bg-orange-700 rounded-full rotate-45 z-0"></div>
+                
+                {/* Alas - LÓGICA MEJORADA */}
+                {/* Espalda: Plegadas arriba */}
+                {isBack && (
+                  <>
+                    <div className="absolute top-2 -left-3 w-4 h-6 bg-orange-500 clip-path-triangle rotate-[-10deg] z-0"></div>
+                    <div className="absolute top-2 -right-3 w-4 h-6 bg-orange-500 clip-path-triangle rotate-[10deg] z-0"></div>
+                  </>
+                )}
+                {/* Perfil (Izquierda/Derecha): Una ala visible */}
+                {isSide && (
+                   <div className="absolute top-3 -left-2 w-3 h-4 bg-orange-500 clip-path-triangle rotate-[260deg] z-0"></div>
+                )}
+                {/* Frente (Abajo): Alas abiertas completas y visibles */}
+                {!isBack && !isSide && (
+                   <>
+                     <div className="absolute top-2 -left-3 w-5 h-7 bg-orange-500 clip-path-triangle rotate-[-45deg] z-0 border-l border-orange-700"></div>
+                     <div className="absolute top-2 -right-3 w-5 h-7 bg-orange-500 clip-path-triangle rotate-[45deg] z-0 border-r border-orange-700"></div>
+                   </>
+                )}
+                
+                {/* Cabeza */}
+                <div className="absolute -top-1 left-1 w-8 h-8 bg-green-600 rounded-xl border border-green-800 flex items-center justify-center shadow-lg z-20">
+                   {!isBack && (
+                     <>
+                       {/* Hocico */}
+                       <div className={`absolute top-3 ${isSide ? '-right-1 w-2' : 'left-1/2 -translate-x-1/2 w-4'} h-3 bg-green-500 rounded-md`}></div>
+                       {/* Ojos */}
+                       <div className={`absolute top-2 ${isSide ? 'right-1' : 'right-1.5'} w-2 h-2 bg-yellow-300 border border-black shadow-[0_0_5px_yellow]`}></div>
+                       {!isSide && <div className="absolute top-2 left-1.5 w-2 h-2 bg-yellow-300 border border-black shadow-[0_0_5px_yellow]"></div>}
+                     </>
+                   )}
+                   {/* Cuernos */}
+                   <div className="absolute -top-2 left-0 w-2 h-3 bg-orange-300 clip-path-triangle -rotate-12"></div>
+                   <div className="absolute -top-2 right-2 w-2 h-3 bg-orange-300 clip-path-triangle rotate-12"></div>
+                </div>
              </div>
-          </div>
-        );
-      case 'ghost':
-        return (
-           <div className={`${commonClasses} animate-float`} style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8, transform }}>
-             {shieldOverlay}
-             {keyIndicator}
-             <div className="relative w-10 h-12 opacity-90 drop-shadow-[0_0_10px_rgba(255,255,255,0.4)]">
-                {/* Trail Effect */}
-                <div className="absolute inset-0 bg-white/30 blur-sm rounded-t-full translate-y-1 scale-90"></div>
-                {/* Body */}
+          );
+
+        case 'samurai':
+          return (
+              <div className="relative w-10 h-10 flex flex-col items-center">
+                 {/* Casco Kabuto */}
+                 <div className="absolute -top-3 w-10 h-6 bg-red-800 rounded-t-lg z-20 flex justify-center">
+                    <div className="absolute -top-3 w-6 h-6 border-b-4 border-yellow-400 rounded-full"></div>
+                    {!isBack && <div className="absolute -top-1 w-2 h-3 bg-yellow-400 clip-path-triangle"></div>}
+                 </div>
+                 {/* Cabeza */}
+                 <div className="w-7 h-7 bg-black rounded-lg border border-red-900 z-10 flex items-center justify-center relative top-2">
+                    {!isBack && (
+                      <div className={`flex gap-1 mt-1 ${isSide ? 'pl-2' : ''}`}>
+                        <div className="w-2 h-1 bg-yellow-400 shadow-[0_0_5px_yellow]"></div>
+                        {!isSide && <div className="w-2 h-1 bg-yellow-400 shadow-[0_0_5px_yellow]"></div>}
+                      </div>
+                    )}
+                 </div>
+                 {/* Cuerpo */}
+                 <div className="absolute bottom-0 w-8 h-5 bg-red-700 rounded-b-lg border-2 border-red-900 z-0 flex flex-col items-center">
+                    {!isBack ? (
+                      <div className="absolute inset-x-0 top-1 h-0.5 bg-yellow-600"></div>
+                    ) : (
+                      <div className="w-4 h-full bg-red-800 border-x border-red-950"></div>
+                    )}
+                 </div>
+              </div>
+          );
+
+        case 'neon':
+          return (
+              <div className="relative w-9 h-11 flex flex-col items-center">
+                <div className="w-8 h-8 bg-black rounded-lg border-2 border-cyan-400 shadow-[0_0_10px_cyan] z-10 overflow-hidden relative">
+                   {!isBack && <div className="absolute top-2 w-full h-2 bg-cyan-400 animate-pulse"></div>}
+                   {isBack && <div className="absolute top-2 left-2 w-4 h-4 bg-zinc-800 border border-cyan-400/50 rounded-full"></div>}
+                </div>
+                <div className="w-6 h-4 bg-zinc-900 border-x-2 border-cyan-400 -mt-1 z-0 relative">
+                   {isBack && <div className="absolute top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-cyan-600 rounded-full animate-ping"></div>}
+                </div>
+                <div className="flex gap-1 -mt-1">
+                   <div className="w-2 h-3 bg-black border-b-2 border-cyan-400"></div>
+                   <div className="w-2 h-3 bg-black border-b-2 border-cyan-400"></div>
+                </div>
+              </div>
+          );
+
+        case 'ghost':
+          return (
+             <div className={`relative w-10 h-12 opacity-80 drop-shadow-[0_0_10px_rgba(255,255,255,0.4)] ${!isExiting ? 'animate-float' : ''}`}>
                 <div className="w-full h-full bg-slate-200 rounded-t-full relative z-10 flex flex-col items-center pt-3 overflow-hidden">
-                   <div className="flex gap-2 mb-2">
-                     <div className="w-2 h-2 bg-black rounded-full opacity-60"></div>
-                     <div className="w-2 h-2 bg-black rounded-full opacity-60"></div>
-                   </div>
+                   {!isBack && (
+                     <div className={`flex gap-2 mb-2 relative ${isSide ? 'left-2' : ''}`}> 
+                       <div className="w-2 h-2 bg-black rounded-full opacity-80"></div>
+                       {!isSide && <div className="w-2 h-2 bg-black rounded-full opacity-80"></div>}
+                     </div>
+                   )}
                    <div className="absolute bottom-0 w-full h-3 bg-slate-200 flex justify-between">
                      <div className="w-3 h-3 bg-black/0 rounded-full -mb-2 border-t-4 border-slate-200"></div>
                    </div>
                 </div>
-                {/* Scarf/Detail */}
-                <div className="absolute top-8 -right-2 w-6 h-2 bg-purple-500/50 blur-[1px] rotate-12"></div>
              </div>
-           </div>
-        );
-      case 'void':
-        return (
-          <div className={commonClasses} style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8 }}>
-             {shieldOverlay}
-             {keyIndicator}
+          );
+
+        case 'void':
+          return (
              <div className="relative w-10 h-10 flex items-center justify-center">
-               {/* Core */}
                <div className="absolute w-6 h-6 bg-black rounded-full shadow-[0_0_15px_purple] z-20"></div>
-               {/* Eye */}
-               <div className="absolute w-2 h-2 bg-cyan-400 rounded-full shadow-[0_0_5px_cyan] z-30 animate-pulse"></div>
-               {/* Ring */}
+               <div className="absolute w-2 h-2 bg-cyan-400 rounded-full shadow-[0_0_5px_cyan] z-30 animate-pulse transition-transform duration-200" 
+                    style={{ 
+                      transform: 
+                        playerFacing === 'right' ? 'translateX(4px)' : 
+                        playerFacing === 'left' ? 'translateX(-4px)' :
+                        playerFacing === 'up' ? 'translateY(-4px)' : 
+                        'translateY(2px)'
+                    }}></div>
                <div className="absolute w-10 h-10 border-2 border-purple-600 rounded-full opacity-80 animate-void z-10 border-t-transparent border-l-transparent"></div>
                <div className="absolute w-12 h-12 border border-purple-900/50 rounded-full animate-void z-0" style={{ animationDirection: 'reverse' }}></div>
              </div>
-          </div>
-        );
-      case 'emerald':
-        return (
-           <div className={commonClasses} style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8, transform }}>
-              {shieldOverlay}
-              {keyIndicator}
-              <div className="relative w-8 h-10">
-                <div className="absolute inset-0 bg-emerald-500 clip-path-hexagon opacity-80 animate-pulse"></div>
-                <div className="absolute inset-0 bg-emerald-600 clip-path-hexagon border-2 border-emerald-300 shadow-[0_0_15px_emerald] flex items-center justify-center">
-                   <div className="w-4 h-1 bg-white/60 rotate-45"></div>
+          );
+
+        case 'emerald':
+          return (
+              <div className="relative w-9 h-11 flex flex-col items-center">
+                <div className="w-8 h-7 bg-emerald-600 rounded-sm border-2 border-emerald-300 shadow-lg flex items-center justify-center relative">
+                   {!isBack && <div className={`w-4 h-2 bg-yellow-300 shadow-[0_0_5px_yellow] relative ${isSide ? 'left-2' : ''}`}></div>}
+                   {isBack && <div className="w-full h-full bg-emerald-700 opacity-50"></div>}
+                </div>
+                <div className="w-7 h-5 bg-emerald-800 -mt-1 rounded-b-lg border-2 border-emerald-500">
+                   {isBack && <div className="w-2 h-4 bg-emerald-900 mx-auto"></div>}
                 </div>
               </div>
-           </div>
-        );
-      case 'crimson':
-        return (
-           <div className={commonClasses} style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8, transform }}>
+          );
+
+        case 'classic':
+        default:
+          return (
+            <div className="relative w-9 h-11 flex flex-col items-center">
+               <div className="absolute -top-2 w-1 h-2 bg-pink-500 z-0"></div>
+               <div className="absolute -top-3 w-2 h-2 bg-pink-500 rounded-full shadow-sm z-0"></div>
+               <div className="w-8 h-7 bg-white rounded-lg border-2 border-zinc-300 shadow-lg relative z-10 flex items-center justify-center overflow-hidden">
+                 {!isBack && (
+                   <div className={`flex gap-1 relative ${isSide ? 'left-2' : ''}`}>
+                     <div className="w-1 h-3 bg-black rounded-full"></div>
+                     {!isSide && <div className="w-1 h-3 bg-black rounded-full"></div>}
+                   </div>
+                 )}
+                 {isBack && <div className="w-4 h-4 bg-zinc-100 rounded-full blur-[1px]"></div>}
+               </div>
+               <div className="w-6 h-4 bg-blue-600 rounded-b-md border-x border-b border-blue-800 -mt-1 z-0 relative">
+                  <div className="absolute top-2 w-full h-1 bg-black"></div>
+                  {!isBack && <div className="absolute top-1 left-1/2 -translate-x-1/2 w-1 h-2 bg-yellow-400"></div>}
+                  {isBack && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-4 h-3 bg-blue-800 rounded-sm"></div>}
+               </div>
+               <div className={`flex gap-1 -mt-1 ${isSide ? 'flex-col -mt-2' : ''}`}>
+                  <div className="w-2.5 h-3 bg-pink-500 rounded-b-md border border-pink-700"></div>
+                  <div className="w-2.5 h-3 bg-pink-500 rounded-b-md border border-pink-700"></div>
+               </div>
+            </div>
+          );
+      }
+    })();
+
+    return (
+      <div 
+        className={`absolute z-30 flex items-center justify-center transition-[top,left] duration-150 ${isExiting ? 'animate-enter-portal' : isDying ? 'animate-die' : ''}`}
+        style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8 }}
+      >
+        {/* Contenedor de Orientación (Flip) - Separado de la animación de caminar para evitar conflictos */}
+        <div 
+          style={{ 
+            transform: shouldFlip ? 'scaleX(-1)' : 'scaleX(1)',
+            transition: 'transform 0.1s linear' // Transición rápida para el giro
+          }}
+          className="w-full h-full flex items-center justify-center"
+        >
+           {/* Contenedor de Animación (Caminar) - Aplica rotación/rebote independientemente del Flip */}
+           <div className={`${isMoving ? 'animate-walk' : 'animate-idle'} flex items-center justify-center`}>
               {shieldOverlay}
               {keyIndicator}
-              <div className="relative w-10 h-10 flex flex-col items-center">
-                 {/* Helmet */}
-                 <div className="w-8 h-7 bg-red-700 rounded-t-lg border-2 border-red-400 flex flex-col items-center pt-2 shadow-[0_0_10px_red]">
-                    <div className="w-6 h-1 bg-black"></div>
-                    <div className="w-1 h-3 bg-cyan-400 shadow-[0_0_5px_cyan] mt-[-2px]"></div>
-                 </div>
-                 {/* Body */}
-                 <div className="w-6 h-4 bg-zinc-800 rounded-b-lg border border-zinc-600 -mt-1 z-0"></div>
-              </div>
+              {skinContent}
            </div>
-        );
-      case 'classic':
-      default:
-        return (
-          <div className={commonClasses} style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8, transform }}>
-            {shieldOverlay}
-            {keyIndicator}
-            <div className={`relative w-10 h-12 ${currentSkin.color} rounded-xl border-2 ${currentSkin.borderColor} shadow-2xl ${currentSkin.glowColor}`}>
-               <div className="absolute -top-4 left-1/2 -translate-x-1/2 flex flex-col items-center">
-                 <div className="w-0.5 h-4 bg-white/60"></div>
-                 <div className={`w-3 h-3 ${currentSkin.ledColor} rounded-full border border-white/40 animate-led`}></div>
-               </div>
-               <div className="absolute top-2 left-1/2 -translate-x-1/2 w-8 h-4 bg-zinc-900 rounded-lg border border-white/20 flex gap-1 justify-center items-center">
-                 <div className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse"></div>
-                 <div className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse"></div>
-               </div>
-               {currentSkin.emoji && !['dragon', 'void'].includes(currentSkinId) && <div className="absolute -right-2 -bottom-1 text-xs">{currentSkin.emoji}</div>}
-            </div>
-          </div>
-        );
-    }
+        </div>
+      </div>
+    );
   };
 
   const renderEnemy = (en: Enemy) => {
+    // ... (El renderizado de enemigos se mantiene igual que en el archivo original)
     if (en.type === 'blob') {
       return (
         <div className="relative w-10 h-10 flex items-center justify-center">
@@ -726,10 +853,11 @@ const Game: React.FC = () => {
 
           {status !== GameStatus.PLAYING && (
             <Overlay 
-              title={status === GameStatus.LEVEL_COMPLETE ? "SECTOR CLEAR" : status === GameStatus.PAUSED ? "PAUSED" : status === GameStatus.GAME_OVER ? "CORE FAILURE" : "WINNER"} 
+              status={status}
+              title={status === GameStatus.LEVEL_COMPLETE ? "SECTOR CLEARED" : status === GameStatus.PAUSED ? "SYSTEM PAUSED" : status === GameStatus.GAME_OVER ? "CRITICAL FAILURE" : "WINNER"} 
               subtitle={`SCORE: ${playerStats.score} | TIME: ${elapsedTime}s`}
-              buttonText={status === GameStatus.LEVEL_COMPLETE ? "SIGUIENTE" : status === GameStatus.PAUSED ? "RESUMIR" : "REINTENTAR"} 
-              secondaryButtonText="VER MAPA"
+              buttonText={status === GameStatus.LEVEL_COMPLETE ? "INIT NEXT SECTOR" : status === GameStatus.PAUSED ? "RESUME MISSION" : "RETRY SECTOR"} 
+              secondaryButtonText="GALAXY MAP"
               onSecondaryClick={() => setStatus(GameStatus.MENU)}
               onClick={() => { 
                 if (status === GameStatus.PAUSED) setStatus(GameStatus.PLAYING); 
@@ -742,6 +870,9 @@ const Game: React.FC = () => {
               highScore={highScore}
               debugSkins={debugUnlockedSkins}
               currentPlanet={currentPlanet}
+              level={level}
+              score={playerStats.score}
+              time={elapsedTime}
             />
           )}
         </div>
@@ -751,46 +882,93 @@ const Game: React.FC = () => {
   );
 };
 
-const Overlay = ({ title, subtitle, buttonText, secondaryButtonText, onClick, onSecondaryClick, showSkins, currentSkinId, onSkinSelect, highScore, debugSkins, currentPlanet }: any) => (
-  <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center bg-black/95 backdrop-blur-3xl rounded-2xl border-4 border-white/10 shadow-2xl p-6 overflow-y-auto">
-    <h1 className="text-4xl font-game mb-2 text-white italic tracking-tighter drop-shadow-2xl text-center uppercase">{title}</h1>
-    <p className="text-xs mb-8 text-indigo-400 font-bold uppercase tracking-widest text-center">{subtitle}</p>
-    
-    <div className="flex flex-col gap-4 w-full max-w-[200px] mb-8">
-      <button className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 rounded-full font-game text-xl tracking-widest shadow-xl active:scale-95 transition-transform" onClick={onClick}>
-        {buttonText}
-      </button>
-
-      {secondaryButtonText && (
-        <button className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 rounded-full font-game text-sm tracking-widest shadow-xl active:scale-95 transition-transform" onClick={onSecondaryClick}>
-          {secondaryButtonText}
-        </button>
-      )}
+// Componente para el Resumen Retro Moderno del Nivel
+const LevelSummary = ({ level, score, time }: { level: number, score: number, time: number }) => (
+  <div className="w-full bg-zinc-900/90 border border-green-500/30 p-4 rounded-lg mb-6 font-digital text-green-400 relative overflow-hidden shadow-[0_0_20px_rgba(34,197,94,0.1)]">
+    <div className="absolute inset-0 bg-scanlines pointer-events-none opacity-20"></div>
+    <div className="flex justify-between items-center border-b border-green-500/30 pb-2 mb-3">
+      <span className="text-xs tracking-widest uppercase">MISSION REPORT</span>
+      <span className="text-xs">LOG #00{level}</span>
     </div>
-
-    {showSkins && (
-      <div className="mb-8 w-full flex flex-col items-center max-w-sm">
-        <span className="text-[10px] text-zinc-500 font-black uppercase mb-4 tracking-[0.2em]">Personalización</span>
-        <div className="grid grid-cols-3 gap-6">
-          {SKINS.map(skin => {
-            const isLocked = !debugSkins && highScore < skin.requiredScore;
-            return (
-              <div key={skin.id} className="flex flex-col items-center gap-1">
-                <button 
-                  onClick={() => !isLocked && onSkinSelect(skin.id)}
-                  className={`relative w-14 h-14 rounded-2xl border-2 flex items-center justify-center ${skin.color} ${skin.borderColor} ${skin.glowColor} ${currentSkinId === skin.id ? 'scale-110 border-white' : ''} ${isLocked ? 'opacity-30 grayscale cursor-not-allowed' : 'hover:scale-105 cursor-pointer'}`}
-                >
-                  {isLocked ? <svg className="w-5 h-5 fill-zinc-400" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM9 8V6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9z"/></svg> : skin.emoji}
-                  {!isLocked && <div className={`absolute -top-1 right-1 w-2 h-2 ${skin.ledColor} rounded-full animate-led`}></div>}
-                </button>
-                <span className={`text-[7px] font-black uppercase ${isLocked ? 'text-rose-500' : 'text-zinc-400'}`}>{isLocked ? `REQ: ${skin.requiredScore}` : skin.name}</span>
-              </div>
-            );
-          })}
-        </div>
+    
+    <div className="space-y-3">
+      <div className="flex justify-between items-center">
+        <span className="text-sm uppercase text-green-600">Time Elapsed</span>
+        <span className="text-xl tracking-wider">{time.toFixed(2)}s</span>
       </div>
-    )}
+      <div className="h-1 bg-green-900/50 w-full rounded-full overflow-hidden">
+         <div className="h-full bg-green-500 w-[70%] shadow-[0_0_10px_green]"></div>
+      </div>
+      
+      <div className="flex justify-between items-center">
+        <span className="text-sm uppercase text-green-600">Total Score</span>
+        <span className="text-xl tracking-wider">{score.toLocaleString()}</span>
+      </div>
+       <div className="h-1 bg-green-900/50 w-full rounded-full overflow-hidden">
+         <div className="h-full bg-green-500 w-[45%] shadow-[0_0_10px_green]"></div>
+      </div>
+      
+      <div className="flex justify-between items-center pt-2 text-xs text-green-700">
+        <span>STATUS</span>
+        <span className="animate-pulse">COMPLETED</span>
+      </div>
+    </div>
   </div>
 );
+
+const Overlay = ({ status, title, subtitle, buttonText, secondaryButtonText, onClick, onSecondaryClick, showSkins, currentSkinId, onSkinSelect, highScore, debugSkins, currentPlanet, level, score, time }: any) => {
+  const isLevelComplete = status === GameStatus.LEVEL_COMPLETE;
+
+  return (
+    <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center bg-black/95 backdrop-blur-3xl rounded-2xl border-4 border-white/10 shadow-2xl p-6 overflow-y-auto">
+      
+      {!isLevelComplete && (
+        <>
+          <h1 className="text-4xl font-game mb-2 text-white italic tracking-tighter drop-shadow-2xl text-center uppercase">{title}</h1>
+          <p className="text-xs mb-8 text-indigo-400 font-bold uppercase tracking-widest text-center">{subtitle}</p>
+        </>
+      )}
+
+      {isLevelComplete && (
+         <LevelSummary level={level} score={score} time={time} />
+      )}
+      
+      <div className="flex flex-col gap-4 w-full max-w-[200px] mb-8">
+        <button className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 rounded-full font-game text-xl tracking-widest shadow-xl active:scale-95 transition-transform border border-indigo-400/50" onClick={onClick}>
+          {buttonText}
+        </button>
+
+        {secondaryButtonText && (
+          <button className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 rounded-full font-game text-sm tracking-widest shadow-xl active:scale-95 transition-transform border border-zinc-600" onClick={onSecondaryClick}>
+            {secondaryButtonText}
+          </button>
+        )}
+      </div>
+
+      {showSkins && (
+        <div className="mb-8 w-full flex flex-col items-center max-w-sm">
+          <span className="text-[10px] text-zinc-500 font-black uppercase mb-4 tracking-[0.2em]">Personalización</span>
+          <div className="grid grid-cols-3 gap-6">
+            {SKINS.map(skin => {
+              const isLocked = !debugSkins && highScore < skin.requiredScore;
+              return (
+                <div key={skin.id} className="flex flex-col items-center gap-1">
+                  <button 
+                    onClick={() => !isLocked && onSkinSelect(skin.id)}
+                    className={`relative w-14 h-14 rounded-2xl border-2 flex items-center justify-center ${skin.color} ${skin.borderColor} ${skin.glowColor} ${currentSkinId === skin.id ? 'scale-110 border-white' : ''} ${isLocked ? 'opacity-30 grayscale cursor-not-allowed' : 'hover:scale-105 cursor-pointer'}`}
+                  >
+                    {isLocked ? <svg className="w-5 h-5 fill-zinc-400" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM9 8V6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9z"/></svg> : skin.emoji}
+                    {!isLocked && <div className={`absolute -top-1 right-1 w-2 h-2 ${skin.ledColor} rounded-full animate-led`}></div>}
+                  </button>
+                  <span className={`text-[7px] font-black uppercase ${isLocked ? 'text-rose-500' : 'text-zinc-400'}`}>{isLocked ? `REQ: ${skin.requiredScore}` : skin.name}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default Game;

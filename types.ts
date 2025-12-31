@@ -26,7 +26,7 @@ export enum GameStatus {
   GAME_WIN = 'GAME_WIN'
 }
 
-export type SkinId = 'classic' | 'emerald' | 'dragon' | 'crimson' | 'gold' | 'void';
+export type SkinId = 'classic' | 'emerald' | 'dragon' | 'samurai' | 'neon' | 'void' | 'ghost';
 
 export interface Skin {
   id: SkinId;
@@ -40,12 +40,13 @@ export interface Skin {
 }
 
 export const SKINS: Skin[] = [
-  { id: 'classic', name: 'Classic', color: 'bg-indigo-600', borderColor: 'border-indigo-300', glowColor: 'shadow-indigo-500/50', requiredScore: 0, ledColor: 'bg-rose-500' },
-  { id: 'emerald', name: 'Emerald', color: 'bg-emerald-600', borderColor: 'border-emerald-300', glowColor: 'shadow-emerald-500/50', requiredScore: 5000, ledColor: 'bg-emerald-400' },
-  { id: 'dragon', name: 'Dragon', color: 'bg-green-800', borderColor: 'border-orange-500', glowColor: 'shadow-orange-600/50', requiredScore: 12000, emoji: '🐲', ledColor: 'bg-orange-500' },
-  { id: 'crimson', name: 'Crimson', color: 'bg-rose-600', borderColor: 'border-rose-300', glowColor: 'shadow-rose-500/50', requiredScore: 25000, ledColor: 'bg-white' },
-  { id: 'gold', name: 'Gold', color: 'bg-amber-500', borderColor: 'border-amber-200', glowColor: 'shadow-amber-400/50', requiredScore: 50000, ledColor: 'bg-white' },
-  { id: 'void', name: 'Void', color: 'bg-zinc-950', borderColor: 'border-purple-500', glowColor: 'shadow-purple-700/80', requiredScore: 100000, emoji: '🌌', ledColor: 'bg-cyan-400' },
+  { id: 'classic', name: 'Bomber Bot', color: 'bg-indigo-600', borderColor: 'border-indigo-300', glowColor: 'shadow-indigo-500/50', requiredScore: 0, ledColor: 'bg-rose-500' },
+  { id: 'neon', name: 'Cyber Neon', color: 'bg-zinc-900', borderColor: 'border-cyan-400', glowColor: 'shadow-cyan-500/80', requiredScore: 5000, ledColor: 'bg-cyan-400' },
+  { id: 'emerald', name: 'Golem', color: 'bg-emerald-600', borderColor: 'border-emerald-300', glowColor: 'shadow-emerald-500/50', requiredScore: 10000, ledColor: 'bg-emerald-400' },
+  { id: 'dragon', name: 'Draco', color: 'bg-green-800', borderColor: 'border-orange-500', glowColor: 'shadow-orange-600/50', requiredScore: 20000, emoji: '🐲', ledColor: 'bg-orange-500' },
+  { id: 'samurai', name: 'Ronin', color: 'bg-red-700', borderColor: 'border-amber-400', glowColor: 'shadow-red-600/50', requiredScore: 35000, ledColor: 'bg-amber-300' },
+  { id: 'ghost', name: 'Specter', color: 'bg-slate-300', borderColor: 'border-slate-100', glowColor: 'shadow-white/40', requiredScore: 50000, ledColor: 'bg-purple-500' },
+  { id: 'void', name: 'Singularity', color: 'bg-zinc-950', borderColor: 'border-purple-500', glowColor: 'shadow-purple-700/80', requiredScore: 100000, emoji: '🌌', ledColor: 'bg-fuchsia-400' },
 ];
 
 export interface Position {

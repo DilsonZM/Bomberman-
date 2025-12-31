@@ -63,6 +63,17 @@
       100% { transform: rotate(360deg) scale(1); }
     }
     
+    /* Nueva animación: Agujero Negro / Salida */
+    @keyframes black-hole-spin {
+      0% { transform: scale(1) rotate(0deg); opacity: 1; }
+      100% { transform: scale(0) rotate(1080deg); opacity: 0; }
+    }
+    
+    @keyframes scanline {
+      0% { background-position: 0% 0%; }
+      100% { background-position: 0% 100%; }
+    }
+
     .animate-fire { animation: fire-core 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
     .fire-particle {
       position: absolute;
@@ -81,6 +92,16 @@
     .animate-float { animation: float-ghost 3s infinite ease-in-out; }
     .animate-void { animation: void-spin 4s infinite linear; }
     .dragon-particle { animation: dragon-breath 0.5s infinite ease-out; }
+    
+    .animate-enter-portal {
+      animation: black-hole-spin 1.5s cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards;
+    }
+    
+    .bg-scanlines {
+      background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.2));
+      background-size: 100% 4px;
+      animation: scanline 0.1s linear infinite;
+    }
     
     body {
       background: #09090b;
