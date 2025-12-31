@@ -1,5 +1,5 @@
 
-import { CellType, Position } from '../types';
+import { CellType, Position, Enemy } from '../types';
 import { GRID_WIDTH, GRID_HEIGHT } from '../constants';
 
 export const generateMap = (level: number) => {
@@ -39,9 +39,9 @@ export const generateMap = (level: number) => {
   return { map, exitPos: { x: 1, y: 1 } };
 };
 
-export const generateEnemies = (level: number, map: CellType[][]) => {
+export const generateEnemies = (level: number, map: CellType[][]): Enemy[] => {
   const count = 2 + level;
-  const enemies = [];
+  const enemies: Enemy[] = [];
   const emptyCells: Position[] = [];
 
   map.forEach((row, y) => row.forEach((cell, x) => {
@@ -53,11 +53,16 @@ export const generateEnemies = (level: number, map: CellType[][]) => {
   for (let i = 0; i < count && emptyCells.length > 0; i++) {
     const idx = Math.floor(Math.random() * emptyCells.length);
     const pos = emptyCells.splice(idx, 1)[0];
+    
+    // A partir del nivel 3 hay probabilidad de que sea fantasma
+    const isGhost = level >= 3 && Math.random() < 0.3;
+
     enemies.push({
       id: `enemy-${Date.now()}-${i}`,
       x: pos.x,
       y: pos.y,
-      type: 'basic' as const,
+      type: isGhost ? 'ghost' : 'basic',
+      canPassBricks: isGhost,
       lastMove: Date.now()
     });
   }

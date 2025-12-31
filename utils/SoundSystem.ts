@@ -11,11 +11,9 @@ class SoundSystem {
   playExplosion() {
     this.init();
     if (!this.ctx) return;
-    const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     const noise = this.ctx.createBufferSource();
     
-    // Create white noise for explosion texture
     const bufferSize = this.ctx.sampleRate * 0.5;
     const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
     const data = buffer.getChannelData(0);
@@ -89,6 +87,22 @@ class SoundSystem {
     gain.connect(this.ctx.destination);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.6);
+  }
+
+  playEnemyDeath() {
+    this.init();
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(220, this.ctx.currentTime + 0.3);
+    gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.3);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.3);
   }
 
   playMove() {

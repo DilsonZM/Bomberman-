@@ -38,7 +38,8 @@ export interface Enemy {
   id: string;
   x: number;
   y: number;
-  type: 'basic' | 'fast' | 'smart';
+  type: 'basic' | 'ghost';
+  canPassBricks: boolean;
   lastMove: number;
 }
 

@@ -35,12 +35,15 @@ const Game: React.FC = () => {
   const [playerStats, setPlayerStats] = useState<PlayerStats>(INITIAL_PLAYER_STATS);
   const [bombs, setBombs] = useState<Bomb[]>([]);
   const [enemies, setEnemies] = useState<Enemy[]>([]);
+  const [dyingEnemies, setDyingEnemies] = useState<Enemy[]>([]);
   const [explosions, setExplosions] = useState<Explosion[]>([]);
   const [scale, setScale] = useState(0.8);
   const [activeTouchDir, setActiveTouchDir] = useState<'up' | 'down' | 'left' | 'right' | null>(null);
   const [shake, setShake] = useState(false);
+  
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [highScore, setHighScore] = useState(0);
 
-  // Refs para evitar cierres obsoletos y controlar tiempos
   const mapRef = useRef(map);
   const enemiesRef = useRef(enemies);
   const playerPosRef = useRef(playerPos);
@@ -49,6 +52,28 @@ const Game: React.FC = () => {
   const playerStatsRef = useRef(playerStats);
   const lastMoveTimeRef = useRef(0);
   const isDyingRef = useRef(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('bomberman_high_score');
+    if (saved) setHighScore(parseInt(saved, 10));
+  }, []);
+
+  useEffect(() => {
+    if (playerStats.score > highScore) {
+      setHighScore(playerStats.score);
+      localStorage.setItem('bomberman_high_score', playerStats.score.toString());
+    }
+  }, [playerStats.score, highScore]);
+
+  useEffect(() => {
+    let timer: number;
+    if (status === GameStatus.PLAYING) {
+      timer = window.setInterval(() => {
+        setElapsedTime(prev => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [status]);
 
   useEffect(() => { mapRef.current = map; }, [map]);
   useEffect(() => { enemiesRef.current = enemies; }, [enemies]);
@@ -64,8 +89,8 @@ const Game: React.FC = () => {
       const screenHeight = window.innerHeight;
       const boardWidth = GRID_WIDTH * CELL_SIZE + 32;
       const boardHeight = GRID_HEIGHT * CELL_SIZE + 32;
-      const availableHeight = screenHeight * 0.45; 
-      const newScale = Math.min(1.1, (screenWidth - 20) / boardWidth, availableHeight / boardHeight);
+      const availableHeight = screenHeight * 0.4; 
+      const newScale = Math.min(1.0, (screenWidth - 20) / boardWidth, availableHeight / boardHeight);
       setScale(newScale);
     };
     handleResize();
@@ -161,9 +186,17 @@ const Game: React.FC = () => {
     }
     
     setEnemies(prev => {
+      const hit = prev.filter(en => newExplosions.some(e => e.x === en.x && e.y === en.y));
       const remaining = prev.filter(en => !newExplosions.some(e => e.x === en.x && e.y === en.y));
-      if (prev.length - remaining.length > 0) {
-        setPlayerStats(s => ({ ...s, score: s.score + (prev.length - remaining.length) * 500 }));
+      
+      if (hit.length > 0) {
+        soundSystem.playEnemyDeath();
+        setDyingEnemies(d => [...d, ...hit]);
+        setTimeout(() => {
+          setDyingEnemies(d => d.filter(de => !hit.find(h => h.id === de.id)));
+        }, 600);
+        
+        setPlayerStats(s => ({ ...s, score: s.score + hit.length * 500 }));
       }
       return remaining;
     });
@@ -179,16 +212,17 @@ const Game: React.FC = () => {
     setMap(newMap);
     setHiddenExit(exitPos);
     setEnemies(newEnemies);
+    setDyingEnemies([]);
     setPlayerPos({ x: 1, y: 1 });
     setBombs([]);
     setExplosions([]);
     setIsDying(false);
     setLevel(lvl);
+    setElapsedTime(0);
     
     if (resetStats) {
       setPlayerStats(INITIAL_PLAYER_STATS);
     } else {
-      // Reiniciar poderes al siguiente nivel pero mantener score y vidas
       setPlayerStats(s => ({
         ...s,
         maxBombs: INITIAL_PLAYER_STATS.maxBombs,
@@ -227,10 +261,10 @@ const Game: React.FC = () => {
   }, []);
 
   const performMove = useCallback((dir: 'up' | 'down' | 'left' | 'right') => {
-    if (statusRef.current !== GameStatus.PLAYING || isDyingRef.current) return;
+    if (statusRef.current !== GameStatus.PLAYING || isDyingRef.current) return false;
     const now = Date.now();
     
-    if (now - lastMoveTimeRef.current < playerStatsRef.current.speed) return;
+    if (now - lastMoveTimeRef.current < playerStatsRef.current.speed) return false;
 
     let nx = playerPosRef.current.x;
     let ny = playerPosRef.current.y;
@@ -276,12 +310,14 @@ const Game: React.FC = () => {
 
       setPlayerPos({ x: nx, y: ny });
       setIsMoving(true);
-      setTimeout(() => setIsMoving(false), 120);
+      setTimeout(() => setIsMoving(false), Math.min(playerStatsRef.current.speed, 150));
       
       if (enemiesRef.current.some(en => en.x === nx && en.y === ny)) {
         handlePlayerDeath();
       }
+      return true;
     }
+    return false;
   }, [handlePlayerDeath]);
 
   const dangerTiles = useMemo(() => {
@@ -310,9 +346,13 @@ const Game: React.FC = () => {
 
   useEffect(() => {
     if (!activeTouchDir || status !== GameStatus.PLAYING) return;
-    performMove(activeTouchDir);
-    const interval = setInterval(() => performMove(activeTouchDir), 30);
-    return () => clearInterval(interval);
+    let timer: number;
+    const tick = () => {
+      performMove(activeTouchDir);
+      timer = window.setTimeout(tick, 16);
+    };
+    tick();
+    return () => clearTimeout(timer);
   }, [activeTouchDir, status, performMove]);
 
   useEffect(() => {
@@ -342,10 +382,17 @@ const Game: React.FC = () => {
         setEnemies(prev => prev.map(en => {
           if (now - en.lastMove < 800) return en;
           const directions = [{dx:0, dy:-1}, {dx:0, dy:1}, {dx:-1, dy:0}, {dx:1, dy:0}];
+          
           const validMoves = directions.filter(d => {
             const nx = en.x + d.dx, ny = en.y + d.dy;
-            return mapRef.current[ny]?.[nx] === CellType.EMPTY && !bombsRef.current.some(b => b.x === nx && b.y === ny);
+            const cell = mapRef.current[ny]?.[nx];
+            if (!cell) return false;
+            if (cell === CellType.WALL) return false;
+            if (cell === CellType.BRICK && !en.canPassBricks) return false;
+            const isOccupiedByBomb = bombsRef.current.some(b => b.x === nx && b.y === ny);
+            return !isOccupiedByBomb;
           });
+
           if (validMoves.length === 0) return en;
           const move = validMoves[Math.floor(Math.random() * validMoves.length)];
           const nx = en.x + move.dx, ny = en.y + move.dy;
@@ -359,7 +406,13 @@ const Game: React.FC = () => {
 
   return (
     <div className="flex flex-col w-full h-full justify-between items-center overflow-hidden touch-none fixed inset-0">
-      <HUD level={level} stats={playerStats} enemiesRemaining={enemies.length} />
+      <HUD 
+        level={level} 
+        stats={playerStats} 
+        enemiesRemaining={enemies.length} 
+        elapsedTime={elapsedTime} 
+        highScore={highScore}
+      />
       
       <div className={`flex-grow flex items-center justify-center w-full px-2 overflow-hidden ${shake ? 'screen-shake' : ''}`}>
         <div 
@@ -370,18 +423,15 @@ const Game: React.FC = () => {
             transform: `scale(${scale})`
           }}
         >
-          {/* Map Grid */}
           <div className="grid overflow-hidden bg-zinc-950 rounded-xl" style={{ gridTemplateColumns: `repeat(${GRID_WIDTH}, ${CELL_SIZE}px)` }}>
             {map.map((row, y) => row.map((cell, x) => <Cell key={`${x}-${y}`} type={cell} />))}
           </div>
 
-          {/* Danger Radar Overlay */}
           {dangerTiles.map((tile, i) => (
             <div key={`danger-${i}`} className="absolute z-0 bg-red-600/30 animate-pulse pointer-events-none rounded-sm border border-red-500/20" 
                  style={{ width: CELL_SIZE, height: CELL_SIZE, left: tile.x * CELL_SIZE + 8, top: tile.y * CELL_SIZE + 8 }} />
           ))}
 
-          {/* Bombs */}
           {bombs.map(bomb => (
             <div key={bomb.id} className="absolute z-10 flex items-center justify-center" 
                  style={{ width: CELL_SIZE, height: CELL_SIZE, left: bomb.x * CELL_SIZE + 8, top: bomb.y * CELL_SIZE + 8 }}>
@@ -392,7 +442,6 @@ const Game: React.FC = () => {
             </div>
           ))}
 
-          {/* Explosions */}
           {explosions.map(exp => (
             <div key={exp.id} className="absolute z-20 animate-explode flex items-center justify-center" 
                  style={{ width: CELL_SIZE, height: CELL_SIZE, left: exp.x * CELL_SIZE + 8, top: exp.y * CELL_SIZE + 8 }}>
@@ -400,7 +449,6 @@ const Game: React.FC = () => {
             </div>
           ))}
 
-          {/* Player Robot */}
           <div className={`absolute z-30 transition-all duration-150 flex items-center justify-center ${isDying ? 'animate-die' : isMoving ? 'animate-walk' : 'animate-idle'}`} 
                style={{ 
                  width: CELL_SIZE, height: CELL_SIZE, 
@@ -417,11 +465,11 @@ const Game: React.FC = () => {
             </div>
           </div>
 
-          {/* Enemies Ghost Robots with RESTORED legs */}
+          {/* Enemigos activos */}
           {enemies.map(en => (
-            <div key={en.id} className="absolute z-10 transition-all duration-700 flex items-center justify-center animate-enemy" 
+            <div key={en.id} className="absolute z-40 transition-all duration-700 flex items-center justify-center animate-enemy" 
                  style={{ width: CELL_SIZE, height: CELL_SIZE, left: en.x * CELL_SIZE + 8, top: en.y * CELL_SIZE + 8 }}>
-              <div className="relative w-10 h-10 bg-rose-600 rounded-full border-2 border-rose-400 shadow-[0_0_25px_rgba(225,29,72,0.7)] flex flex-col items-center">
+              <div className={`relative w-10 h-10 ${en.type === 'ghost' ? 'bg-purple-600 opacity-70 border-purple-300 shadow-[0_0_25px_purple]' : 'bg-rose-600 border-rose-400 shadow-[0_0_25px_rgba(225,29,72,0.7)]'} rounded-full border-2 flex flex-col items-center transition-colors duration-500`}>
                  <div className="mt-2.5 flex gap-2">
                     <div className="w-2.5 h-2.5 bg-white rounded-full flex items-center justify-center">
                        <div className="w-1 h-1 bg-black rounded-full animate-pulse"></div>
@@ -430,20 +478,31 @@ const Game: React.FC = () => {
                        <div className="w-1 h-1 bg-black rounded-full animate-pulse"></div>
                     </div>
                  </div>
-                 {/* PATITAS RESTAURADAS */}
                  <div className="absolute -bottom-2 flex gap-1.5">
-                    <div className="w-2 h-3 bg-rose-800 rounded-full transform rotate-12"></div>
-                    <div className="w-2 h-3 bg-rose-800 rounded-full transform -rotate-12"></div>
+                    <div className={`w-2 h-3 ${en.type === 'ghost' ? 'bg-purple-900' : 'bg-rose-800'} rounded-full transform rotate-12`}></div>
+                    <div className={`w-2 h-3 ${en.type === 'ghost' ? 'bg-purple-900' : 'bg-rose-800'} rounded-full transform -rotate-12`}></div>
                  </div>
               </div>
             </div>
           ))}
 
-          {/* Overlays */}
+          {/* Enemigos en animación de muerte - Renderizados arriba con z-50 */}
+          {dyingEnemies.map(en => (
+            <div key={`dying-${en.id}`} className="absolute z-50 flex items-center justify-center animate-enemy-die" 
+                 style={{ width: CELL_SIZE, height: CELL_SIZE, left: en.x * CELL_SIZE + 8, top: en.y * CELL_SIZE + 8 }}>
+              <div className={`relative w-10 h-10 ${en.type === 'ghost' ? 'bg-purple-600' : 'bg-rose-600'} rounded-full border-2 border-white/80 shadow-[0_0_40px_white] flex flex-col items-center`}>
+                 <div className="mt-2.5 flex gap-2">
+                    <div className="w-2.5 h-2.5 bg-white rounded-full"></div>
+                    <div className="w-2.5 h-2.5 bg-white rounded-full"></div>
+                 </div>
+              </div>
+            </div>
+          ))}
+
           {status !== GameStatus.PLAYING && (
             <Overlay 
               title={status === GameStatus.MENU ? "BOMBERMAN" : status === GameStatus.LEVEL_COMPLETE ? "SECTOR CLEAR" : "SYSTEM FAILURE"} 
-              subtitle={status !== GameStatus.MENU ? `TOTAL SCORE: ${playerStats.score}` : "THE GALAXY CORE"}
+              subtitle={status !== GameStatus.MENU ? `SCORE: ${playerStats.score} | TIME: ${elapsedTime}s` : "COLLECT CORES, SURVIVE THE GHOSTS"}
               buttonText={status === GameStatus.MENU ? "LAUNCH" : status === GameStatus.LEVEL_COMPLETE ? "NEXT CORE" : "REBOOT"} 
               onClick={() => status === GameStatus.LEVEL_COMPLETE ? initLevel(level + 1) : initLevel(1, true)} 
               color={status === GameStatus.GAME_OVER ? "bg-rose-950/90" : "bg-black/95"}
@@ -458,9 +517,9 @@ const Game: React.FC = () => {
 };
 
 const Overlay = ({ title, subtitle, buttonText, onClick, color }: any) => (
-  <div className={`absolute inset-0 z-50 flex flex-col items-center justify-center ${color} backdrop-blur-3xl rounded-2xl border-4 border-white/5 shadow-2xl`}>
+  <div className={`absolute inset-0 z-[60] flex flex-col items-center justify-center ${color} backdrop-blur-3xl rounded-2xl border-4 border-white/5 shadow-2xl`}>
     <h1 className="text-7xl font-game mb-4 text-transparent bg-clip-text bg-gradient-to-b from-white via-zinc-400 to-zinc-700 italic tracking-tighter drop-shadow-2xl text-center px-4">{title}</h1>
-    {subtitle && <p className="text-xl mb-14 text-indigo-300 font-bold uppercase tracking-[0.5em] drop-shadow-[0_0_10px_rgba(99,102,241,0.5)] text-center">{subtitle}</p>}
+    {subtitle && <p className="text-xl mb-14 text-indigo-300 font-bold uppercase tracking-[0.2em] drop-shadow-[0_0_10px_rgba(99,102,241,0.5)] text-center px-4">{subtitle}</p>}
     <button className="group relative px-20 py-8 bg-indigo-700 hover:bg-indigo-600 transition-all rounded-full overflow-hidden shadow-[0_20px_80px_rgba(67,56,202,0.6)] active:scale-90" onClick={onClick}>
        <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/40 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
        <span className="relative text-white font-game text-4xl tracking-widest">{buttonText}</span>
