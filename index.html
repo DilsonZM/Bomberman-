@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Inter:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
   <title>Bomberman Ultra: Megatorre</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
@@ -49,10 +49,21 @@
       75% { transform: translate(4px, 4px); }
       100% { transform: translate(0,0); }
     }
-    
-    .animate-fire {
-      animation: fire-core 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    @keyframes float-ghost {
+      0%, 100% { transform: translateY(-2px) scale(0.95); opacity: 0.8; }
+      50% { transform: translateY(-8px) scale(1.05); opacity: 0.6; }
     }
+    @keyframes dragon-breath {
+      0% { transform: scale(0.8) translateY(0); opacity: 0.8; }
+      100% { transform: scale(0) translateY(10px); opacity: 0; }
+    }
+    @keyframes void-spin {
+      0% { transform: rotate(0deg) scale(1); }
+      50% { transform: rotate(180deg) scale(0.9); }
+      100% { transform: rotate(360deg) scale(1); }
+    }
+    
+    .animate-fire { animation: fire-core 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
     .fire-particle {
       position: absolute;
       width: 6px;
@@ -67,6 +78,9 @@
     .animate-die { animation: player-die 0.8s forwards; }
     .animate-led { animation: pulse-led 0.6s infinite ease-in-out; }
     .screen-shake { animation: screen-shake 0.15s linear 2; }
+    .animate-float { animation: float-ghost 3s infinite ease-in-out; }
+    .animate-void { animation: void-spin 4s infinite linear; }
+    .dragon-particle { animation: dragon-breath 0.5s infinite ease-out; }
     
     body {
       background: #09090b;
@@ -79,6 +93,7 @@
       font-family: 'Inter', sans-serif;
     }
     .font-game { font-family: 'Bungee', cursive; }
+    .font-digital { font-family: 'Share Tech Mono', monospace; }
   </style>
   <script type="importmap">
 {

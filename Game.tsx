@@ -47,8 +47,8 @@ const Game: React.FC = () => {
   const [shake, setShake] = useState(false);
   const [debugUnlockedSkins, setDebugUnlockedSkins] = useState(false);
   
-  // Nuevo estado para el Escudo (Chaleco)
   const [shieldEndTime, setShieldEndTime] = useState(0);
+  const [shieldMaxDuration, setShieldMaxDuration] = useState(0);
   
   const [elapsedTime, setElapsedTime] = useState(0);
   const [highScore, setHighScore] = useState(0);
@@ -121,8 +121,6 @@ const Game: React.FC = () => {
 
   const handlePlayerDeath = useCallback(() => {
     if (isDyingRef.current) return;
-    
-    // Check Shield (Invulnerability)
     if (Date.now() < shieldEndTimeRef.current) return;
 
     setIsDying(true);
@@ -135,8 +133,9 @@ const Game: React.FC = () => {
       });
       setPlayerPos({ x: 1, y: 1 });
       setIsDying(false);
-      // Give 3 seconds of shield after respawn (posterior a morir)
-      setShieldEndTime(Date.now() + 3000);
+      const duration = 3000;
+      setShieldEndTime(Date.now() + duration);
+      setShieldMaxDuration(duration);
     }, 800);
   }, []);
 
@@ -181,7 +180,7 @@ const Game: React.FC = () => {
             else if (rand < 0.30) updatedMap[ny][nx] = CellType.POWERUP_SPEED;
             else if (rand < 0.35) updatedMap[ny][nx] = CellType.POWERUP_DANGER;
             else if (rand < 0.37) updatedMap[ny][nx] = CellType.POWERUP_LIFE;
-            else if (rand < 0.40) updatedMap[ny][nx] = CellType.POWERUP_VEST; // Chance for Vest
+            else if (rand < 0.40) updatedMap[ny][nx] = CellType.POWERUP_VEST;
             else updatedMap[ny][nx] = CellType.EMPTY;
           }
           scoreGained += 25;
@@ -195,9 +194,21 @@ const Game: React.FC = () => {
     setPlayerStats(s => ({ ...s, score: s.score + scoreGained }));
     
     if (newExplosions.some(e => e.x === playerPosRef.current.x && e.y === playerPosRef.current.y)) handlePlayerDeath();
+    
     setEnemies(prev => {
-      const hit = prev.filter(en => newExplosions.some(e => e.x === en.x && e.y === en.y));
-      const remaining = prev.filter(en => !newExplosions.some(e => e.x === en.x && e.y === en.y));
+      const hit = prev.filter(en => {
+        const isDirectHit = newExplosions.some(e => e.x === en.x && e.y === en.y);
+        let isTransitionHit = false;
+        if (en.prevX !== undefined && en.prevY !== undefined) {
+           const timeSinceMove = now - en.lastMove;
+           if (timeSinceMove < 500) {
+             isTransitionHit = newExplosions.some(e => e.x === en.prevX && e.y === en.prevY);
+           }
+        }
+        return isDirectHit || isTransitionHit;
+      });
+
+      const remaining = prev.filter(en => !hit.some(h => h.id === en.id));
       if (hit.length > 0) {
         soundSystem.playEnemyDeath();
         setDyingEnemies(d => [...d, ...hit]);
@@ -223,20 +234,11 @@ const Game: React.FC = () => {
     setIsDying(false);
     setLevel(lvl);
     setElapsedTime(0);
-    
-    // ACTIVAR ESCUDO AL INICIAR NIVEL: 5 SEGUNDOS
-    setShieldEndTime(Date.now() + 5000); 
-    
+    const duration = 5000;
+    setShieldEndTime(Date.now() + duration);
+    setShieldMaxDuration(duration);
     if (resetStats) setPlayerStats(INITIAL_PLAYER_STATS);
-    else setPlayerStats(s => ({ 
-      ...s, 
-      hasKey: false, 
-      // Keep lives, radar, etc. Reset map specific things.
-      maxBombs: s.maxBombs,
-      range: s.range,
-      speed: s.speed,
-      dangerSensorUses: s.dangerSensorUses
-    }));
+    else setPlayerStats(s => ({ ...s, hasKey: false, maxBombs: s.maxBombs, range: s.range, speed: s.speed, dangerSensorUses: s.dangerSensorUses }));
     setStatus(GameStatus.PLAYING);
   }, []);
 
@@ -297,8 +299,9 @@ const Game: React.FC = () => {
         else if (cell === CellType.POWERUP_LIFE) setPlayerStats(s => ({ ...s, lives: Math.min(5, s.lives + 1), score: s.score + 500 }));
         else if (cell === CellType.POWERUP_DANGER) setPlayerStats(s => ({ ...s, dangerSensorUses: s.dangerSensorUses + 5, score: s.score + 300 }));
         else if (cell === CellType.POWERUP_VEST) {
-           // ACTIVAR ESCUDO POR ITEM: 30 SEGUNDOS
-           setShieldEndTime(Date.now() + 30000); 
+           const duration = 30000;
+           setShieldEndTime(Date.now() + duration);
+           setShieldMaxDuration(duration); 
            setPlayerStats(s => ({ ...s, score: s.score + 500 }));
         }
         setMap(m => { const nm = [...m.map(r => [...r])]; nm[ny][nx] = CellType.EMPTY; return nm; });
@@ -388,7 +391,6 @@ const Game: React.FC = () => {
           const nx = en.x + d.dx, ny = en.y + d.dy;
           const cell = mapRef.current[ny]?.[nx];
           if (!cell || cell === CellType.WALL) return false;
-          // Bosses and Ghosts can pass bricks
           if (cell === CellType.BRICK && !en.canPassBricks) return false;
           return !bombsRef.current.some(b => b.x === nx && b.y === ny);
         });
@@ -396,31 +398,155 @@ const Game: React.FC = () => {
         const move = validMoves[Math.floor(Math.random() * validMoves.length)];
         const nx = en.x + move.dx, ny = en.y + move.dy;
         if (nx === playerPosRef.current.x && ny === playerPosRef.current.y) handlePlayerDeath();
-        return { ...en, x: nx, y: ny, lastMove: now };
+        return { ...en, x: nx, y: ny, prevX: en.x, prevY: en.y, lastMove: now };
       }));
     }, 100);
     return () => clearInterval(interval);
   }, [triggerExplosion, handlePlayerDeath]);
 
-  // Si estamos en el menú, mostramos el WorldMap
   if (status === GameStatus.MENU || status === GameStatus.MAP) {
     return (
       <WorldMap 
         unlockedLevel={unlockedLevel} 
-        onSelectLevel={(lvl) => {
-          setLevel(lvl);
-          initLevel(lvl, true);
-        }} 
+        onSelectLevel={(lvl) => { setLevel(lvl); initLevel(lvl, true); }} 
         highScore={highScore}
-        onUnlockAll={() => {
-          setUnlockedLevel(25);
-          setDebugUnlockedSkins(true);
-        }}
+        onUnlockAll={() => { setUnlockedLevel(25); setDebugUnlockedSkins(true); }}
       />
     );
   }
 
-  // Render visual del enemigo terrorífico
+  // RENDERIZADOR DE PLAYER PERSONALIZADO POR SKIN
+  const renderPlayer = () => {
+    const isShieldActive = Date.now() < shieldEndTime;
+    const commonClasses = `absolute z-30 transition-all duration-150 flex items-center justify-center ${isDying ? 'animate-die' : isMoving ? 'animate-walk' : 'animate-idle'}`;
+    const transform = `scaleX(${playerFacing === 'right' ? 1 : -1})`;
+
+    // ELEMENTOS COMUNES
+    const shieldOverlay = isShieldActive ? (
+      <div className="absolute -inset-2 bg-sky-500/20 rounded-full border-2 border-sky-400/40 shadow-[0_0_15px_#38bdf8] animate-pulse pointer-events-none z-50"></div>
+    ) : null;
+    const keyIndicator = playerStats.hasKey ? <div className="absolute -left-2 -top-2 text-xs z-50 animate-bounce">🔑</div> : null;
+
+    switch (currentSkinId) {
+      case 'dragon':
+        return (
+          <div className={commonClasses} style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8, transform }}>
+             {shieldOverlay}
+             {keyIndicator}
+             <div className="relative w-10 h-10">
+                {/* Dragon Breath Fire */}
+                <div className="absolute top-1/2 -right-4 w-2 h-2 bg-orange-500 rounded-full blur-[2px] opacity-0 dragon-particle"></div>
+                <div className="absolute top-1/2 -right-6 w-1 h-1 bg-red-500 rounded-full blur-[1px] opacity-0 dragon-particle" style={{ animationDelay: '0.2s' }}></div>
+                
+                {/* Body */}
+                <div className="absolute bottom-0 left-2 w-6 h-6 bg-orange-700 rounded-full border border-orange-900 shadow-inner"></div>
+                <div className="absolute bottom-1 left-1 w-2 h-4 bg-orange-600 rounded-full -rotate-12"></div>
+                <div className="absolute bottom-1 right-3 w-2 h-4 bg-orange-600 rounded-full rotate-12"></div>
+                
+                {/* Head */}
+                <div className="absolute top-1 left-1 w-8 h-7 bg-orange-600 rounded-xl border border-orange-800 flex items-center justify-center shadow-lg z-10">
+                   {/* Horns */}
+                   <div className="absolute -top-2 -left-1 w-3 h-4 bg-yellow-600 clip-path-triangle -rotate-12"></div>
+                   <div className="absolute -top-2 right-1 w-3 h-4 bg-yellow-600 clip-path-triangle rotate-12"></div>
+                   {/* Eyes */}
+                   <div className="w-2 h-2 bg-yellow-300 rotate-45 border border-black shadow-[0_0_5px_yellow]"></div>
+                   <div className="w-2 h-2 bg-yellow-300 rotate-45 border border-black shadow-[0_0_5px_yellow] ml-2"></div>
+                </div>
+                {/* Tail */}
+                <div className="absolute bottom-2 -left-2 w-4 h-2 bg-orange-700 rounded-full rotate-45 z-0"></div>
+             </div>
+          </div>
+        );
+      case 'ghost':
+        return (
+           <div className={`${commonClasses} animate-float`} style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8, transform }}>
+             {shieldOverlay}
+             {keyIndicator}
+             <div className="relative w-10 h-12 opacity-90 drop-shadow-[0_0_10px_rgba(255,255,255,0.4)]">
+                {/* Trail Effect */}
+                <div className="absolute inset-0 bg-white/30 blur-sm rounded-t-full translate-y-1 scale-90"></div>
+                {/* Body */}
+                <div className="w-full h-full bg-slate-200 rounded-t-full relative z-10 flex flex-col items-center pt-3 overflow-hidden">
+                   <div className="flex gap-2 mb-2">
+                     <div className="w-2 h-2 bg-black rounded-full opacity-60"></div>
+                     <div className="w-2 h-2 bg-black rounded-full opacity-60"></div>
+                   </div>
+                   <div className="absolute bottom-0 w-full h-3 bg-slate-200 flex justify-between">
+                     <div className="w-3 h-3 bg-black/0 rounded-full -mb-2 border-t-4 border-slate-200"></div>
+                   </div>
+                </div>
+                {/* Scarf/Detail */}
+                <div className="absolute top-8 -right-2 w-6 h-2 bg-purple-500/50 blur-[1px] rotate-12"></div>
+             </div>
+           </div>
+        );
+      case 'void':
+        return (
+          <div className={commonClasses} style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8 }}>
+             {shieldOverlay}
+             {keyIndicator}
+             <div className="relative w-10 h-10 flex items-center justify-center">
+               {/* Core */}
+               <div className="absolute w-6 h-6 bg-black rounded-full shadow-[0_0_15px_purple] z-20"></div>
+               {/* Eye */}
+               <div className="absolute w-2 h-2 bg-cyan-400 rounded-full shadow-[0_0_5px_cyan] z-30 animate-pulse"></div>
+               {/* Ring */}
+               <div className="absolute w-10 h-10 border-2 border-purple-600 rounded-full opacity-80 animate-void z-10 border-t-transparent border-l-transparent"></div>
+               <div className="absolute w-12 h-12 border border-purple-900/50 rounded-full animate-void z-0" style={{ animationDirection: 'reverse' }}></div>
+             </div>
+          </div>
+        );
+      case 'emerald':
+        return (
+           <div className={commonClasses} style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8, transform }}>
+              {shieldOverlay}
+              {keyIndicator}
+              <div className="relative w-8 h-10">
+                <div className="absolute inset-0 bg-emerald-500 clip-path-hexagon opacity-80 animate-pulse"></div>
+                <div className="absolute inset-0 bg-emerald-600 clip-path-hexagon border-2 border-emerald-300 shadow-[0_0_15px_emerald] flex items-center justify-center">
+                   <div className="w-4 h-1 bg-white/60 rotate-45"></div>
+                </div>
+              </div>
+           </div>
+        );
+      case 'crimson':
+        return (
+           <div className={commonClasses} style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8, transform }}>
+              {shieldOverlay}
+              {keyIndicator}
+              <div className="relative w-10 h-10 flex flex-col items-center">
+                 {/* Helmet */}
+                 <div className="w-8 h-7 bg-red-700 rounded-t-lg border-2 border-red-400 flex flex-col items-center pt-2 shadow-[0_0_10px_red]">
+                    <div className="w-6 h-1 bg-black"></div>
+                    <div className="w-1 h-3 bg-cyan-400 shadow-[0_0_5px_cyan] mt-[-2px]"></div>
+                 </div>
+                 {/* Body */}
+                 <div className="w-6 h-4 bg-zinc-800 rounded-b-lg border border-zinc-600 -mt-1 z-0"></div>
+              </div>
+           </div>
+        );
+      case 'classic':
+      default:
+        return (
+          <div className={commonClasses} style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8, transform }}>
+            {shieldOverlay}
+            {keyIndicator}
+            <div className={`relative w-10 h-12 ${currentSkin.color} rounded-xl border-2 ${currentSkin.borderColor} shadow-2xl ${currentSkin.glowColor}`}>
+               <div className="absolute -top-4 left-1/2 -translate-x-1/2 flex flex-col items-center">
+                 <div className="w-0.5 h-4 bg-white/60"></div>
+                 <div className={`w-3 h-3 ${currentSkin.ledColor} rounded-full border border-white/40 animate-led`}></div>
+               </div>
+               <div className="absolute top-2 left-1/2 -translate-x-1/2 w-8 h-4 bg-zinc-900 rounded-lg border border-white/20 flex gap-1 justify-center items-center">
+                 <div className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse"></div>
+                 <div className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse"></div>
+               </div>
+               {currentSkin.emoji && !['dragon', 'void'].includes(currentSkinId) && <div className="absolute -right-2 -bottom-1 text-xs">{currentSkin.emoji}</div>}
+            </div>
+          </div>
+        );
+    }
+  };
+
   const renderEnemy = (en: Enemy) => {
     if (en.type === 'blob') {
       return (
@@ -515,14 +641,14 @@ const Game: React.FC = () => {
     return null;
   };
 
-  const isShieldActive = Date.now() < shieldEndTime;
-
   return (
     <div className="flex flex-col w-full h-full justify-between items-center overflow-hidden touch-none fixed inset-0">
       <HUD 
         level={level} stats={playerStats} enemiesRemaining={enemies.length} 
         elapsedTime={elapsedTime} highScore={highScore} onPause={togglePause}
         isPaused={status === GameStatus.PAUSED} showPause={status === GameStatus.PLAYING || status === GameStatus.PAUSED}
+        shieldEndTime={shieldEndTime}
+        shieldMaxDuration={shieldMaxDuration}
       />
       
       <div className={`flex-grow flex items-center justify-center w-full px-2 overflow-hidden ${shake ? 'screen-shake' : ''}`}>
@@ -537,10 +663,8 @@ const Game: React.FC = () => {
           {/* Bombas y Radar Visual */}
           {bombs.map(bomb => (
             <React.Fragment key={bomb.id}>
-              {/* Radar: Visualización de peligro si tiene showDanger */}
               {bomb.showDanger && (
                  <>
-                   {/* Vertical Hazard */}
                    <div 
                      className="absolute z-0 bg-red-500/20 animate-pulse border-x border-red-500/30"
                      style={{
@@ -550,7 +674,6 @@ const Game: React.FC = () => {
                         height: (Math.min(GRID_HEIGHT, bomb.y + bomb.range + 1) - Math.max(0, bomb.y - bomb.range)) * CELL_SIZE
                      }}
                    />
-                   {/* Horizontal Hazard */}
                    <div 
                      className="absolute z-0 bg-red-500/20 animate-pulse border-y border-red-500/30"
                      style={{
@@ -584,29 +707,11 @@ const Game: React.FC = () => {
             </div>
           ))}
 
-          <div className={`absolute z-30 transition-all duration-150 flex items-center justify-center ${isDying ? 'animate-die' : isMoving ? 'animate-walk' : 'animate-idle'}`} 
-               style={{ width: CELL_SIZE, height: CELL_SIZE, left: playerPos.x * CELL_SIZE + 8, top: playerPos.y * CELL_SIZE + 8, transform: `scaleX(${playerFacing === 'right' ? 1 : -1})` }}>
-            <div className={`relative w-10 h-12 ${currentSkin.color} rounded-xl border-2 ${currentSkin.borderColor} shadow-2xl ${currentSkin.glowColor} ${isShieldActive ? 'ring-4 ring-sky-400/50 shadow-[0_0_20px_rgba(56,189,248,0.6)]' : ''}`}>
-               {/* Shield Bubble Overlay */}
-               {isShieldActive && (
-                 <div className="absolute -inset-3 bg-sky-500/20 rounded-full border-2 border-sky-400/40 shadow-[0_0_15px_#38bdf8] animate-pulse pointer-events-none"></div>
-               )}
-               
-               <div className="absolute -top-4 left-1/2 -translate-x-1/2 flex flex-col items-center">
-                 <div className="w-0.5 h-4 bg-white/60"></div>
-                 <div className={`w-3 h-3 ${currentSkin.ledColor} rounded-full border border-white/40 animate-led`}></div>
-               </div>
-               <div className="absolute top-2 left-1/2 -translate-x-1/2 w-8 h-4 bg-zinc-900 rounded-lg border border-white/20 flex gap-1 justify-center items-center">
-                 <div className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse"></div>
-                 <div className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse"></div>
-               </div>
-               {currentSkin.emoji && <div className="absolute -right-2 -bottom-1 text-xs">{currentSkin.emoji}</div>}
-               {playerStats.hasKey && <div className="absolute -left-3 -top-1 text-xs">🔑</div>}
-            </div>
-          </div>
+          {/* PLAYER RENDER */}
+          {renderPlayer()}
 
           {enemies.map(en => (
-            <div key={en.id} className="absolute z-40 transition-all duration-700 flex items-center justify-center" 
+            <div key={en.id} className="absolute z-40 transition-all duration-500 flex items-center justify-center" 
                  style={{ width: CELL_SIZE, height: CELL_SIZE, left: en.x * CELL_SIZE + 8, top: en.y * CELL_SIZE + 8 }}>
                {renderEnemy(en)}
             </div>

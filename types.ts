@@ -67,6 +67,8 @@ export interface Enemy {
   id: string;
   x: number;
   y: number;
+  prevX?: number; // Para interpolación de hitbox
+  prevY?: number; // Para interpolación de hitbox
   type: 'blob' | 'bat' | 'slider' | 'ghost' | 'mecha' | 'boss';
   canPassBricks: boolean;
   lastMove: number;

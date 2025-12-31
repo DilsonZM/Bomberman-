@@ -128,6 +128,8 @@ export const generateEnemies = (level: number, map: CellType[][]): Enemy[] => {
       id: `en-${Date.now()}-${i}`,
       x: pos.x,
       y: pos.y,
+      prevX: pos.x, // Init
+      prevY: pos.y, // Init
       type: type,
       canPassBricks: type === 'ghost' || type === 'boss',
       speed: config.speed + (Math.random() * 100),
