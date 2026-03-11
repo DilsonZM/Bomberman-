@@ -23,6 +23,8 @@ View your app in AI Studio: https://ai.studio/apps/drive/1fYG6niKnbvtVMzmr4CCXWX
 
 This repo includes a GitHub Actions workflow in `.github/workflows/deploy.yml` that builds and deploys the `dist/` folder to GitHub Pages.
 
+Deployment URL: https://dilsonzm.github.io/Bomberman-/
+
 To enable it:
 1. Go to **Settings → Pages** in GitHub.
 2. In **Build and deployment**, set **Source** to **GitHub Actions**.
